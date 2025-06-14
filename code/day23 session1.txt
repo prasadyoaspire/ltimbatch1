@@ -1,0 +1,366 @@
+@Entity
+public class Account {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private int accountId;
+    private String accountNumber;
+    private String accountHolderName;
+    private String branch;
+
+public class User {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private int userId; 
+    private String username;
+    private String password;
+    private String role;
+
+
+
+import com.examly.springapp.model.User;
+
+public interface UserRepo extends JpaRepository<User,Integer>{
+    Optional<User> findByUsername(String username);
+}
+
+
+public interface AccountRepo extends JpaRepository<Account,Integer> {
+    
+}
+
+
+package com.examly.springapp.configuration;
+
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.stereotype.Component;
+
+import com.examly.springapp.model.User;
+import com.examly.springapp.repository.UserRepo;
+
+@Component
+public class CustomUserDetailsService implements UserDetailsService{
+
+    private final UserRepo userRepo;
+
+    public CustomUserDetailsService(UserRepo userRepo) {
+        this.userRepo = userRepo;
+    }
+
+    @Override
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        User user = userRepo.findByUsername(username)
+            .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
+        return new UserPrinciple(user);
+    }
+    
+}
+
+
+package com.examly.springapp.configuration;
+
+import java.util.Collection;
+import java.util.Collections;
+import java.util.stream.Collectors;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.stereotype.Component;
+
+import com.examly.springapp.model.User;
+
+
+public class UserPrinciple implements UserDetails {
+
+
+    private User user;
+
+    public UserPrinciple(User user) {
+        this.user = user;
+    }
+
+    // @Override
+    // public Collection<? extends GrantedAuthority> getAuthorities() {
+    // return user.getRoles().stream()
+    // .map(SimpleGrantedAuthority::new)
+    // .collect(Collectors.toSet());
+    // }
+
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return Collections.singleton(new SimpleGrantedAuthority(user.getRole()));    
+    }
+
+    @Override
+    public String getPassword() {
+        return user.getUsername();
+    }
+
+    @Override
+    public String getUsername() {
+        return user.getPassword();
+    }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return true;
+    }
+
+    public User getUser() {
+        return user;
+    }
+
+}
+
+
+
+package com.examly.springapp.configuration;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.provisioning.InMemoryUserDetailsManager;
+import org.springframework.security.web.SecurityFilterChain;
+
+import com.examly.springapp.model.User;
+
+
+@Configuration
+@EnableWebSecurity
+@EnableMethodSecurity
+public class SecurityConfig {
+    
+    @Autowired
+    private CustomUserDetailsService userDetailsService;
+
+     @Bean
+    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        return http.csrf(csrf -> csrf.disable())
+                .cors(cors -> cors.disable())                       
+                .authorizeHttpRequests().requestMatchers(HttpMethod.POST,"/account").hasRole("USER")
+                .and()
+                .authorizeHttpRequests().requestMatchers(HttpMethod.GET,"/account").hasRole("ADMIN")
+                .and()
+                .authorizeHttpRequests().requestMatchers(HttpMethod.DELETE,"/account").hasRole("ADMIN")
+                .and()
+                .authorizeHttpRequests().requestMatchers("/user/register","user/login").permitAll()
+                .and()
+                .authorizeHttpRequests().anyRequest().authenticated()
+                .and()         
+                .httpBasic()
+                .and()
+                .formLogin().disable()
+                .build();
+    }
+
+     @Bean
+    public AuthenticationManager authManager(HttpSecurity http) throws Exception {
+        return http.getSharedObject(AuthenticationManagerBuilder.class)
+            .userDetailsService(userDetailsService)
+            .passwordEncoder(passwordEncoder())
+            .and()
+            .build();
+    }
+
+    @Bean
+    PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+}
+
+
+========================================
+
+package com.examly.springapp.service;
+
+import java.util.List;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+
+import com.examly.springapp.model.User;
+import com.examly.springapp.repository.UserRepo;
+
+@Service
+public class UserService {
+    
+    @Autowired
+    private UserRepo userRepo;
+
+     @Autowired
+    private AuthenticationManager authenticationManager;
+
+    public User register(User user) {
+        return userRepo.save(user);
+    }
+    public boolean login(User user) {
+        
+        try {
+            Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(user.getUsername(), user.getPassword())
+            );
+
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+            return true;
+           
+
+        } catch (BadCredentialsException e) {
+           return false;
+        }
+    }
+
+
+}
+
+===================================================
+
+package com.examly.springapp.service;
+
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import com.examly.springapp.model.Account;
+import com.examly.springapp.repository.AccountRepo;
+
+@Service
+public class AccountService {
+    
+    @Autowired
+     AccountRepo accountRepo;
+
+    public Account createAccount(Account account) {
+        return accountRepo.save(account);
+    }
+
+    public List<Account> viewAllAccount() {
+        return accountRepo.findAll();
+    }
+
+    public boolean deleteAccount(int accountId) {
+        Optional<Account> optionalObj = accountRepo.findById(accountId);
+        if(optionalObj.isEmpty()) {
+
+        }
+        accountRepo.delete(optionalObj.get());
+        return true;
+    }
+}
+
+=================================
+
+package com.examly.springapp.controller;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.examly.springapp.model.User;
+import com.examly.springapp.service.UserService;
+
+@RestController
+public class UserController {
+    
+    @Autowired
+    private UserService userService;
+      
+    @PostMapping("/user/register")
+    public ResponseEntity<User> register(@RequestBody User user) {
+        return new ResponseEntity<>(userService.register(user),HttpStatus.CREATED);
+    }
+    @PostMapping("/user/login")
+    public ResponseEntity<String> login(@RequestBody User user) {
+        
+        boolean result =  userService.login(user);
+        if(result) {
+             return ResponseEntity.ok("Login successful");
+        }
+        else {
+            return ResponseEntity.status(500).build();
+        }         
+    }
+}
+
+=============================================
+
+package com.examly.springapp.controller;
+
+import java.util.List;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.examly.springapp.model.Account;
+import com.examly.springapp.model.User;
+import com.examly.springapp.service.AccountService;
+
+@RestController
+public class AccountController {
+
+    @Autowired
+    private AccountService accountService;
+
+    @PostMapping("/account")
+    public ResponseEntity<Account> createAccount(@RequestBody Account account) {
+        accountService.createAccount(account);
+        return ResponseEntity.status(201).body(account);
+    }
+
+    @GetMapping("/account")
+    public ResponseEntity<List<Account>> viewAllAccount() {
+        return ResponseEntity.status(200).body(accountService.viewAllAccount());
+    }
+
+    @DeleteMapping("/account/{accountId}")
+    public ResponseEntity<Boolean> deleteAccount(@PathVariable int accountId) {
+        
+        return ResponseEntity.status(200).body(true);
+    }
+}
+
