@@ -1,0 +1,145 @@
+
+@Entity
+public class Category {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private int id;
+    private String name;
+    @ManyToMany(mappedBy = "categories")
+    // @JoinColumn(name="product_id")
+    private Set<Product> products = new HashSet<>();
+    
+}
+
+@Entity
+public class Product {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private int id;
+    private String name;
+    private double price;
+    @ManyToMany
+    @JoinTable(name = "product_category", joinColumns = @JoinColumn(name = "product_id"), inverseJoinColumns = @JoinColumn(name = "category_id"))
+    @JsonIgnore
+    private Set<Category> categories = new HashSet<>();
+}
+
+public interface ProductRepository extends JpaRepository<Product,Integer>{
+    
+}
+
+public interface CategoryRepository extends JpaRepository<Category,Integer>{
+    
+    @Query("SELECT p FROM Product p JOIN p.categories c WHERE c.id = :categoryId ORDER BY p.price ASC")
+    List<Product> findProductsByCategoryIdOrderByPriceAsc(@Param("categoryId") int categoryId);
+}
+
+
+@Service
+public class ProductCategoryService {
+
+    @Autowired
+    private ProductRepository productRepository;
+
+    @Autowired
+    private CategoryRepository categoryRepository;
+
+    public Category addCategory(Category category) {
+        categoryRepository.save(category);
+        return category;
+    }
+
+    public Product saveProduct(int categoryId, Product product) {
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new RuntimeException("Category not found"));
+
+        // Add category to product
+        product.getCategories().add(category);
+
+        // Save product (this will persist the relation)
+        Product savedProduct = productRepository.save(product);
+
+        // Add product to category (maintain bidirectional consistency)
+        category.getProducts().add(savedProduct);
+        categoryRepository.save(category);
+
+        return savedProduct;
+    }
+
+    public void addProduct(int categoryId, int productId) {
+
+        Optional<Category> categoryOpt = categoryRepository.findById(categoryId);
+        Optional<Product> productOpt = productRepository.findById(productId);
+
+        if (categoryOpt.isPresent() && productOpt.isPresent()) {
+            Category category = categoryOpt.get();
+            Product product = productOpt.get();
+
+            category.getProducts().add(product);
+            product.getCategories().add(category);
+
+            categoryRepository.save(category);
+            productRepository.save(product);
+        }
+    }
+
+    public Category findCategoryById(int categoryId) {
+        return categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new ResourceNotFoundException("Category not found with id:" + categoryId));
+    }
+
+    public List<Product> findProductByCategory(int categoryId) {
+
+        return categoryRepository.findProductsByCategoryIdOrderByPriceAsc(categoryId);
+    }
+
+    public void deleteProduct(int productId) {
+        productRepository.deleteById(productId);
+    }
+}
+
+
+@RestController
+public class ApiController {
+
+    @Autowired
+    private ProductCategoryService pCategoryService;
+
+    @PostMapping("/categories")
+    public ResponseEntity<Category> addCategory(@RequestBody Category category) {
+        Category createdCategory = pCategoryService.addCategory(category);
+        return ResponseEntity.status(201).body(createdCategory);
+    }
+
+    @PostMapping("/categories/{categoryId}/product")
+    public ResponseEntity<Product> addProductToCategory(@PathVariable int categoryId, @RequestBody Product product) {
+        Product createdProduct = pCategoryService.saveProduct(categoryId, product);
+        return ResponseEntity.status(201).body(createdProduct);
+    }
+
+    @GetMapping("/categories/{categoryId}")
+    public ResponseEntity<Category> findCategoryById(@PathVariable int categoryId) {
+        Category category = pCategoryService.findCategoryById(categoryId);
+        return ResponseEntity.status(200).body(category);
+    }
+
+    @GetMapping("/categories/{categoryId}/product/asc-price")
+    public List<Product> getProductByCategory(@PathVariable int categoryId) {
+        return pCategoryService.findProductByCategory(categoryId);
+    }
+
+    @DeleteMapping("/categories/product/{productId}")
+    public ResponseEntity<Void> deleteProduct(@PathVariable int productId) {
+        pCategoryService.deleteProduct(productId);
+        return ResponseEntity.ok().build();
+    }
+}
+
+
+public class ResourceNotFoundException extends RuntimeException {
+    
+    public ResourceNotFoundException(String msg) {
+        super(msg);
+    }
+}
+
