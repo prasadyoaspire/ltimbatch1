@@ -1,0 +1,55 @@
+Get all Passbooks with a Credit Card
+
+@Query("SELECT p FROM Passbook p WHERE p.creditCard IS NOT NULL")
+List<Passbook> findAllWithCreditCard();
+
+Get all Passbooks without a Credit Card
+
+@Query("SELECT p FROM Passbook p WHERE p.creditCard IS NULL")
+List<Passbook> findAllWithoutCreditCard();
+
+Find Passbook by Credit Card number
+
+@Query("SELECT p FROM Passbook p WHERE p.creditCard.cardNumber = :cardNumber")
+Passbook findByCardNumber(@Param("cardNumber") String cardNumber);
+
+Get CreditCard by Passbook ID
+
+@Query("SELECT c FROM CreditCard c WHERE c.passbook.id = :passbookId")
+CreditCard findByPassbookId(@Param("passbookId") Long passbookId);
+
+Get all CreditCards with accountHolder name
+
+@Query("SELECT c FROM CreditCard c WHERE c.passbook.accountHolder = :name")
+List<CreditCard> findByAccountHolder(@Param("name") String name);
+
+
+
+
+
+==============================================================
+
+
+Get all flights from a specific airport name
+
+@Query("SELECT f FROM Flight f WHERE f.airport.airPortName = :airportName")
+List<Flight> findFlightsByAirportName(@Param("airportName") String airportName);
+
+
+Get all airports that have at least one flight
+
+@Query("SELECT DISTINCT a FROM Airport a JOIN a.flights f")
+List<Airport> findAirportsWithFlights();
+
+
+Get all airports that do not have any flights
+
+@Query("SELECT a FROM Airport a WHERE a.flights IS EMPTY")
+List<Airport> findAirportsWithoutFlights();
+
+
+ Count flights for a given airport ID
+
+@Query("SELECT COUNT(f) FROM Flight f WHERE f.airport.id = :airportId")
+Long countFlightsByAirport(@Param("airportId") Long airportId);
+
